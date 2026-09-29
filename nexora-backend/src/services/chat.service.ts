@@ -142,9 +142,9 @@ const getAuthorizedConversation = async (
       : conversation.user1_id;
 
   const blockedRows = await prisma.$queryRaw<
-    Array<{ id: bigint }>
+    Array<{ blocked: number }>
   >`
-    SELECT id
+    SELECT 1 AS blocked
     FROM blocks
     WHERE
       (
@@ -230,9 +230,9 @@ export const createConversation = async (
       : match.user1_id;
 
   const blockedRows = await prisma.$queryRaw<
-    Array<{ id: bigint }>
+    Array<{ blocked: number }>
   >`
-    SELECT id
+    SELECT 1 AS blocked
     FROM blocks
     WHERE
       (

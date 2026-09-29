@@ -1,21 +1,23 @@
 import "dotenv/config";
 
-import cors from "cors";
 import express from "express";
+import cors from "cors";
+import http from "http";
+import { Server } from "socket.io";
 
 import prisma from "./config/prisma";
-import errorMiddleware from "./middlewares/error.middleware";
 
-import authRoutes from "./routes/auth.routes";
 import healthRoutes from "./routes/health.routes";
+import authRoutes from "./routes/auth.routes";
 import profileRoutes from "./routes/profile.routes";
 import interestRoutes from "./routes/interest.routes";
 import photoRoutes from "./routes/photo.routes";
-
 import discoverRoutes from "./routes/discover.routes";
 import swipeRoutes from "./routes/swipe.routes";
 import matchRoutes from "./routes/match.routes";
 import chatRoutes from "./routes/chat.routes";
+
+import { registerChatSocket } from "./sockets/chat.socket";
 
 const app = express();
 
@@ -23,57 +25,56 @@ const PORT = Number(
   process.env.PORT || 5000
 );
 
-const originalJson =
-  app.response.json;
+const httpServer =
+  http.createServer(app);
 
-app.response.json = function (
-  body: unknown
-) {
-  const jsonSafeBody =
-    JSON.parse(
-      JSON.stringify(
-        body,
-        (_key, value) => {
-          if (
-            typeof value === "bigint"
-          ) {
-            return Number(value);
-          }
+const io = new Server(
+  httpServer,
+  {
+    cors: {
+      origin: "*",
+      methods: [
+        "GET",
+        "POST",
+        "PATCH",
+        "PUT",
+        "DELETE",
+      ],
+    },
 
-          return value;
-        }
-      )
-    );
+    transports: [
+      "websocket",
+      "polling",
+    ],
+  }
+);
 
-  return originalJson.call(
-    this,
-    jsonSafeBody
-  );
-};
+/* =========================
+   MIDDLEWARE
+========================= */
 
 app.use(
   cors({
-    origin: true,
-    credentials: true,
+    origin: "*",
+    methods: [
+      "GET",
+      "POST",
+      "PATCH",
+      "PUT",
+      "DELETE",
+    ],
   })
 );
 
 app.use(express.json());
 
-app.use(
-  express.urlencoded({
-    extended: true,
-  })
-);
+app.use(express.urlencoded({
+  extended: true,
+}));
 
-app.get("/", (_req, res) => {
-  return res.status(200).json({
-    success: true,
-    message:
-      "Welcome to Nexora API",
-    version: "1.0.0",
-  });
-});
+/* =========================
+   API ROUTES
+========================= */
 
 app.use(
   "/api/health",
@@ -86,13 +87,13 @@ app.use(
 );
 
 app.use(
-  "/api/interests",
-  interestRoutes
+  "/api/profile",
+  profileRoutes
 );
 
 app.use(
-  "/api/profile",
-  profileRoutes
+  "/api/interests",
+  interestRoutes
 );
 
 app.use(
@@ -120,58 +121,112 @@ app.use(
   chatRoutes
 );
 
+/* =========================
+   ROOT
+========================= */
+
+app.get("/", (_req, res) => {
+  res.json({
+    success: true,
+    message: "Welcome to Nexora API",
+    version: "1.0.0",
+  });
+});
+
+/* =========================
+   SOCKET.IO
+========================= */
+
+registerChatSocket(io);
+
+/* =========================
+   404
+========================= */
+
 app.use(
-  (_req, res) => {
-    return res.status(404).json({
+  (
+    _req,
+    res
+  ) => {
+    res.status(404).json({
       success: false,
       message: "Route not found",
     });
   }
 );
 
-app.use(errorMiddleware);
+/* =========================
+   ERROR HANDLER
+========================= */
 
-const startServer =
-  async (): Promise<void> => {
-    try {
-      await prisma.$connect();
+app.use(
+  (
+    error: unknown,
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction
+  ) => {
+    console.error(
+      "Unhandled application error:",
+      error
+    );
 
-      console.log(
-        "✅ MySQL database connected successfully"
-      );
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Internal server error";
 
-      const dbTest =
-        await prisma.$queryRaw<
-          Array<{
-            test: bigint | number;
-          }>
-        >`SELECT 1 AS test`;
+    res.status(500).json({
+      success: false,
+      message,
+    });
+  }
+);
 
-      console.log(
-        "✅ Application Prisma query successful:",
-        dbTest
-      );
+/* =========================
+   DATABASE + SERVER
+========================= */
 
-      app.listen(
-        PORT,
-        () => {
-          console.log(
-            `🚀 Nexora API running on http://localhost:${PORT}`
-          );
-        }
-      );
-    } catch (error) {
-      console.error(
-        "❌ Failed to connect to database:",
-        error
-      );
+const startServer = async () => {
+  try {
+    await prisma.$queryRaw`
+      SELECT 1 AS test
+    `;
 
-      await prisma.$disconnect();
+    console.log(
+      "✅ MySQL database connected successfully"
+    );
 
-      process.exit(1);
-    }
-  };
+    console.log(
+      "✅ Application Prisma query successful"
+    );
+
+    httpServer.listen(
+      PORT,
+      () => {
+        console.log(
+          `🚀 Nexora API running on http://localhost:${PORT}`
+        );
+
+        console.log(
+          `⚡ Socket.IO running on ws://localhost:${PORT}`
+        );
+      }
+    );
+  } catch (error) {
+    console.error(
+      "❌ Failed to start Nexora server:",
+      error
+    );
+
+    process.exit(1);
+  }
+};
 
 startServer();
 
-export default app;
+export {
+  app,
+  io,
+  httpServer,
+};
