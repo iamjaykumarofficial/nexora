@@ -1,0 +1,308 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+model blocks {
+  blocker_id                     BigInt    @db.UnsignedBigInt
+  blocked_id                     BigInt    @db.UnsignedBigInt
+  created_at                     DateTime? @default(now()) @db.DateTime(0)
+  users_blocks_blocker_idTousers users     @relation("blocks_blocker_idTousers", fields: [blocker_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "blocks_ibfk_1")
+  users_blocks_blocked_idTousers users     @relation("blocks_blocked_idTousers", fields: [blocked_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "blocks_ibfk_2")
+
+  @@id([blocker_id, blocked_id])
+  @@index([blocked_id], map: "blocked_id")
+}
+
+model conversations {
+  id              BigInt     @id @default(autoincrement()) @db.UnsignedBigInt
+  match_id        BigInt     @unique(map: "match_id") @db.UnsignedBigInt
+  last_message_at DateTime?  @db.DateTime(0)
+  created_at      DateTime?  @default(now()) @db.DateTime(0)
+  matches         matches    @relation(fields: [match_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "conversations_ibfk_1")
+  messages        messages[]
+}
+
+model date_invites {
+  id                                     BigInt                 @id @default(autoincrement()) @db.UnsignedBigInt
+  match_id                               BigInt                 @db.UnsignedBigInt
+  from_user_id                           BigInt                 @db.UnsignedBigInt
+  to_user_id                             BigInt                 @db.UnsignedBigInt
+  date_type                              date_invites_date_type
+  proposed_time                          DateTime?              @db.DateTime(0)
+  place_name                             String?                @db.VarChar(255)
+  note                                   String?                @db.Text
+  status                                 date_invites_status?   @default(pending)
+  created_at                             DateTime?              @default(now()) @db.DateTime(0)
+  matches                                matches                @relation(fields: [match_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "date_invites_ibfk_1")
+  users_date_invites_from_user_idTousers users                  @relation("date_invites_from_user_idTousers", fields: [from_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "date_invites_ibfk_2")
+  users_date_invites_to_user_idTousers   users                  @relation("date_invites_to_user_idTousers", fields: [to_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "date_invites_ibfk_3")
+
+  @@index([from_user_id], map: "from_user_id")
+  @@index([match_id], map: "match_id")
+  @@index([to_user_id], map: "to_user_id")
+}
+
+model interests {
+  id             Int              @id @default(autoincrement()) @db.UnsignedInt
+  name           String           @unique(map: "name") @db.VarChar(50)
+  user_interests user_interests[]
+}
+
+model matches {
+  id                            BigInt         @id @default(autoincrement()) @db.UnsignedBigInt
+  user1_id                      BigInt         @db.UnsignedBigInt
+  user2_id                      BigInt         @db.UnsignedBigInt
+  matched_at                    DateTime?      @default(now()) @db.DateTime(0)
+  is_active                     Boolean?       @default(true)
+  conversations                 conversations?
+  date_invites                  date_invites[]
+  users_matches_user1_idTousers users          @relation("matches_user1_idTousers", fields: [user1_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "matches_ibfk_1")
+  users_matches_user2_idTousers users          @relation("matches_user2_idTousers", fields: [user2_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "matches_ibfk_2")
+
+  @@unique([user1_id, user2_id], map: "unique_match")
+  @@index([user1_id], map: "idx_user1")
+  @@index([user2_id], map: "idx_user2")
+}
+
+model messages {
+  id              BigInt         @id @default(autoincrement()) @db.UnsignedBigInt
+  conversation_id BigInt         @db.UnsignedBigInt
+  sender_id       BigInt         @db.UnsignedBigInt
+  type            messages_type? @default(text)
+  content         String?        @db.Text
+  media_url       String?        @db.VarChar(500)
+  is_read         Boolean?       @default(false)
+  created_at      DateTime?      @default(now()) @db.DateTime(0)
+  conversations   conversations  @relation(fields: [conversation_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "messages_ibfk_1")
+  users           users          @relation(fields: [sender_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "messages_ibfk_2")
+
+  @@index([conversation_id, created_at], map: "idx_conversation")
+  @@index([sender_id], map: "sender_id")
+}
+
+model otps {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  phone      String    @db.VarChar(20)
+  code       String    @db.VarChar(6)
+  expires_at DateTime  @db.DateTime(0)
+  is_used    Boolean?  @default(false)
+  created_at DateTime? @default(now()) @db.DateTime(0)
+
+  @@index([phone], map: "idx_phone")
+}
+
+model photos {
+  id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  user_id     BigInt    @db.UnsignedBigInt
+  url         String    @db.VarChar(500)
+  position    Int?      @default(0) @db.UnsignedTinyInt
+  is_verified Boolean?  @default(false)
+  created_at  DateTime? @default(now()) @db.DateTime(0)
+  users       users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "photos_ibfk_1")
+
+  @@index([user_id, position], map: "idx_user_position")
+}
+
+model plans {
+  id             Int             @id @default(autoincrement()) @db.UnsignedInt
+  name           String          @db.VarChar(30)
+  duration_hours Int
+  price          Decimal         @db.Decimal(10, 2)
+  is_active      Boolean?        @default(true)
+  subscriptions  subscriptions[]
+}
+
+model profiles {
+  user_id             BigInt                      @id @db.UnsignedBigInt
+  full_name           String                      @db.VarChar(100)
+  date_of_birth       DateTime                    @db.Date
+  gender              profiles_gender
+  looking_for         profiles_looking_for
+  relationship_goal   profiles_relationship_goal?
+  bio                 String?                     @db.VarChar(500)
+  height_cm           Int?                        @db.UnsignedSmallInt
+  city                String?                     @db.VarChar(100)
+  latitude            Decimal?                    @db.Decimal(10, 8)
+  longitude           Decimal?                    @db.Decimal(11, 8)
+  is_verified         Boolean?                    @default(false)
+  is_profile_complete Boolean?                    @default(false)
+  created_at          DateTime?                   @default(now()) @db.DateTime(0)
+  updated_at          DateTime?                   @default(now()) @db.DateTime(0)
+  users               users                       @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "profiles_ibfk_1")
+
+  @@index([gender, looking_for], map: "idx_gender_looking")
+  @@index([latitude, longitude], map: "idx_location")
+}
+
+model reports {
+  id                               BigInt          @id @default(autoincrement()) @db.UnsignedBigInt
+  reporter_id                      BigInt          @db.UnsignedBigInt
+  reported_id                      BigInt          @db.UnsignedBigInt
+  reason                           reports_reason
+  details                          String?         @db.Text
+  status                           reports_status? @default(pending)
+  created_at                       DateTime?       @default(now()) @db.DateTime(0)
+  users_reports_reporter_idTousers users           @relation("reports_reporter_idTousers", fields: [reporter_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "reports_ibfk_1")
+  users_reports_reported_idTousers users           @relation("reports_reported_idTousers", fields: [reported_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "reports_ibfk_2")
+
+  @@index([reported_id], map: "reported_id")
+  @@index([reporter_id], map: "reporter_id")
+}
+
+model select_limits {
+  user_id    BigInt    @id @db.UnsignedBigInt
+  used_count Int?      @default(0) @db.UnsignedInt
+  reset_at   DateTime? @db.DateTime(0)
+  updated_at DateTime? @default(now()) @db.DateTime(0)
+  users      users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "select_limits_ibfk_1")
+}
+
+model subscriptions {
+  id          BigInt                  @id @default(autoincrement()) @db.UnsignedBigInt
+  user_id     BigInt                  @db.UnsignedBigInt
+  plan_id     Int                     @db.UnsignedInt
+  starts_at   DateTime                @db.DateTime(0)
+  ends_at     DateTime                @db.DateTime(0)
+  status      subscriptions_status?   @default(active)
+  payment_ref String?                 @db.VarChar(255)
+  platform    subscriptions_platform?
+  created_at  DateTime?               @default(now()) @db.DateTime(0)
+  users       users                   @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "subscriptions_ibfk_1")
+  plans       plans                   @relation(fields: [plan_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "subscriptions_ibfk_2")
+
+  @@index([user_id, status], map: "idx_user_active")
+  @@index([plan_id], map: "plan_id")
+}
+
+model swipes {
+  id                               BigInt        @id @default(autoincrement()) @db.UnsignedBigInt
+  from_user_id                     BigInt        @db.UnsignedBigInt
+  to_user_id                       BigInt        @db.UnsignedBigInt
+  action                           swipes_action
+  created_at                       DateTime?     @default(now()) @db.DateTime(0)
+  users_swipes_from_user_idTousers users         @relation("swipes_from_user_idTousers", fields: [from_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "swipes_ibfk_1")
+  users_swipes_to_user_idTousers   users         @relation("swipes_to_user_idTousers", fields: [to_user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "swipes_ibfk_2")
+
+  @@unique([from_user_id, to_user_id], map: "unique_swipe")
+  @@index([from_user_id], map: "idx_from_user")
+  @@index([to_user_id], map: "idx_to_user")
+}
+
+model user_interests {
+  user_id     BigInt    @db.UnsignedBigInt
+  interest_id Int       @db.UnsignedInt
+  users       users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "user_interests_ibfk_1")
+  interests   interests @relation(fields: [interest_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "user_interests_ibfk_2")
+
+  @@id([user_id, interest_id])
+  @@index([interest_id], map: "interest_id")
+}
+
+model users {
+  id                                            BigInt           @id @default(autoincrement()) @db.UnsignedBigInt
+  phone                                         String?          @unique(map: "phone") @db.VarChar(20)
+  email                                         String?          @unique(map: "email") @db.VarChar(255)
+  google_id                                     String?          @unique(map: "google_id") @db.VarChar(255)
+  apple_id                                      String?          @unique(map: "apple_id") @db.VarChar(255)
+  is_phone_verified                             Boolean?         @default(false)
+  is_active                                     Boolean?         @default(true)
+  is_banned                                     Boolean?         @default(false)
+  last_active_at                                DateTime?        @db.DateTime(0)
+  created_at                                    DateTime?        @default(now()) @db.DateTime(0)
+  updated_at                                    DateTime?        @default(now()) @db.DateTime(0)
+  blocks_blocks_blocker_idTousers               blocks[]         @relation("blocks_blocker_idTousers")
+  blocks_blocks_blocked_idTousers               blocks[]         @relation("blocks_blocked_idTousers")
+  date_invites_date_invites_from_user_idTousers date_invites[]   @relation("date_invites_from_user_idTousers")
+  date_invites_date_invites_to_user_idTousers   date_invites[]   @relation("date_invites_to_user_idTousers")
+  matches_matches_user1_idTousers               matches[]        @relation("matches_user1_idTousers")
+  matches_matches_user2_idTousers               matches[]        @relation("matches_user2_idTousers")
+  messages                                      messages[]
+  photos                                        photos[]
+  profiles                                      profiles?
+  reports_reports_reporter_idTousers            reports[]        @relation("reports_reporter_idTousers")
+  reports_reports_reported_idTousers            reports[]        @relation("reports_reported_idTousers")
+  select_limits                                 select_limits?
+  subscriptions                                 subscriptions[]
+  swipes_swipes_from_user_idTousers             swipes[]         @relation("swipes_from_user_idTousers")
+  swipes_swipes_to_user_idTousers               swipes[]         @relation("swipes_to_user_idTousers")
+  user_interests                                user_interests[]
+
+  @@index([last_active_at], map: "idx_last_active")
+  @@index([phone], map: "idx_phone")
+}
+
+enum messages_type {
+  text
+  image
+  voice
+}
+
+enum profiles_gender {
+  man
+  woman
+  non_binary
+}
+
+enum reports_reason {
+  fake
+  harassment
+  inappropriate
+  scam
+  other
+}
+
+enum swipes_action {
+  like
+  pass
+  superlike
+}
+
+enum date_invites_date_type {
+  coffee
+  dinner
+  movie
+  walk
+  other
+}
+
+enum profiles_looking_for {
+  men
+  women
+  everyone
+}
+
+enum profiles_relationship_goal {
+  long_term
+  short_term
+  figuring_out
+  friendship
+}
+
+enum reports_status {
+  pending
+  resolved
+  dismissed
+}
+
+enum subscriptions_status {
+  active
+  expired
+  cancelled
+}
+
+enum subscriptions_platform {
+  android
+  ios
+}
+
+enum date_invites_status {
+  pending
+  accepted
+  declined
+  cancelled
+}
