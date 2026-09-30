@@ -16,8 +16,12 @@ import discoverRoutes from "./routes/discover.routes";
 import swipeRoutes from "./routes/swipe.routes";
 import matchRoutes from "./routes/match.routes";
 import chatRoutes from "./routes/chat.routes";
+import notificationRoutes from "./routes/notification.routes";
 
 import { registerChatSocket } from "./sockets/chat.socket";
+import dateInviteRoutes from "./routes/date-invite.routes";
+import blockRoutes from "./routes/block.routes";
+import reportRoutes from "./routes/report.routes";
 
 const app = express();
 
@@ -121,6 +125,24 @@ app.use(
   chatRoutes
 );
 
+app.use(
+  "/api/notifications", notificationRoutes
+);
+
+app.use(
+  "/api/date-invites",
+  dateInviteRoutes
+);
+
+app.use(
+  "/api/blocks",
+  blockRoutes
+);
+
+app.use(
+  "/api/reports",
+  reportRoutes
+);
 /* =========================
    ROOT
 ========================= */

@@ -1,4 +1,5 @@
 import prisma from "../config/prisma";
+import { createNotification } from "./notification.service";
 
 type SwipeAction = "like" | "pass" | "superlike";
 
@@ -437,6 +438,7 @@ const getOrCreateMatch = async (
 
     return {
       isMatch: true,
+      isNewMatch: false,
       match: {
         id: Number(existingMatch.id),
         user1Id: Number(existingMatch.user1_id),
@@ -476,6 +478,7 @@ const getOrCreateMatch = async (
       WHERE
         user1_id = ${user1Id}
         AND user2_id = ${user2Id}
+      ORDER BY id DESC
       LIMIT 1
     `;
 
@@ -485,17 +488,37 @@ const getOrCreateMatch = async (
 
   const createdMatch = createdMatches[0];
 
+  const match = {
+    id: Number(createdMatch.id),
+    user1Id: Number(createdMatch.user1_id),
+    user2Id: Number(createdMatch.user2_id),
+    matchedAt: createdMatch.matched_at,
+    isActive: Boolean(
+      createdMatch.is_active
+    ),
+  };
+
+  await Promise.all([
+    createNotification({
+      userId: Number(user1Id),
+      type: "new_match",
+      title: "It's a match! 🎉",
+      message: "You have a new match on Nexora.",
+      referenceId: match.id,
+    }),
+    createNotification({
+      userId: Number(user2Id),
+      type: "new_match",
+      title: "It's a match! 🎉",
+      message: "You have a new match on Nexora.",
+      referenceId: match.id,
+    }),
+  ]);
+
   return {
     isMatch: true,
-    match: {
-      id: Number(createdMatch.id),
-      user1Id: Number(createdMatch.user1_id),
-      user2Id: Number(createdMatch.user2_id),
-      matchedAt: createdMatch.matched_at,
-      isActive: Boolean(
-        createdMatch.is_active
-      ),
-    },
+    isNewMatch: true,
+    match,
   };
 };
 

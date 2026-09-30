@@ -1,48 +1,252 @@
 import { Server, Socket } from "socket.io";
-import { verifyToken } from "../utils/jwt";
+
 import prisma from "../config/prisma";
+import { verifyToken } from "../utils/jwt";
 import {
-  sendMessage,
   markConversationAsRead,
+  sendMessage,
 } from "../services/chat.service";
+import { setNotificationEmitter } from "../services/notification.service";
 
 interface AuthenticatedSocket extends Socket {
   userId?: string;
 }
 
-interface JoinConversationPayload {
-  conversationId: string | number;
-}
-
-interface SendMessagePayload {
-  conversationId: string | number;
+interface MessageSendPayload {
+  conversationId: number | string;
   type?: "text" | "image" | "voice";
   content?: string | null;
   mediaUrl?: string | null;
 }
 
-interface ReadMessagePayload {
-  conversationId: string | number;
+interface MessageReadPayload {
+  conversationId: number | string;
+}
+
+interface ConversationPayload {
+  conversationId: number | string;
 }
 
 interface TypingPayload {
-  conversationId: string | number;
+  conversationId: number | string;
 }
 
-const normalizeId = (value: string | number): string => {
-  const id = String(value).trim();
+interface PresencePayload {
+  userId: number | string;
+}
 
-  if (!/^\d+$/.test(id) || BigInt(id) <= 0n) {
+interface PresenceRecord {
+  user_id: bigint;
+  is_online: number | boolean;
+  last_seen_at: Date | null;
+}
+
+const normalizeId = (value: number | string): number => {
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error("Invalid conversation ID");
   }
 
-  return id;
+  return parsed;
+};
+
+const getConversationRoom = (
+  conversationId: number
+): string => {
+  return `conversation:${conversationId}`;
+};
+
+const getUserRoom = (userId: string): string => {
+  return `user:${userId}`;
+};
+
+const normalizeUserId = (value: number | string): string => {
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error("Invalid user ID");
+  }
+
+  return String(parsed);
+};
+
+const formatPresence = (record: PresenceRecord) => ({
+  userId: Number(record.user_id),
+  isOnline: Boolean(record.is_online),
+  lastSeenAt: record.last_seen_at,
+});
+
+const ensurePresenceRow = async (userId: string): Promise<void> => {
+  const numericUserId = Number(userId);
+
+  await prisma.$executeRaw`
+    INSERT INTO user_presence (
+      user_id,
+      is_online,
+      last_seen_at
+    )
+    VALUES (
+      ${numericUserId},
+      FALSE,
+      NULL
+    )
+    ON DUPLICATE KEY UPDATE
+      user_id = user_presence.user_id
+  `;
+};
+
+const setUserOnline = async (userId: string): Promise<void> => {
+  const numericUserId = Number(userId);
+
+  await prisma.$executeRaw`
+    INSERT INTO user_presence (
+      user_id,
+      is_online,
+      last_seen_at
+    )
+    VALUES (
+      ${numericUserId},
+      TRUE,
+      NULL
+    )
+    ON DUPLICATE KEY UPDATE
+      is_online = TRUE,
+      last_seen_at = NULL
+  `;
+};
+
+const setUserOffline = async (userId: string): Promise<PresenceRecord> => {
+  const numericUserId = Number(userId);
+
+  await prisma.$executeRaw`
+    INSERT INTO user_presence (
+      user_id,
+      is_online,
+      last_seen_at
+    )
+    VALUES (
+      ${numericUserId},
+      FALSE,
+      NOW()
+    )
+    ON DUPLICATE KEY UPDATE
+      is_online = FALSE,
+      last_seen_at = NOW()
+  `;
+
+  const rows = await prisma.$queryRaw<PresenceRecord[]>`
+    SELECT
+      user_id,
+      is_online,
+      last_seen_at
+    FROM user_presence
+    WHERE user_id = ${numericUserId}
+    LIMIT 1
+  `;
+
+  if (rows.length === 0) {
+    throw new Error("Unable to read user presence");
+  }
+
+  return rows[0];
+};
+
+const getUserPresence = async (userId: string): Promise<PresenceRecord> => {
+  const numericUserId = Number(userId);
+
+  await ensurePresenceRow(userId);
+
+  const rows = await prisma.$queryRaw<PresenceRecord[]>`
+    SELECT
+      user_id,
+      is_online,
+      last_seen_at
+    FROM user_presence
+    WHERE user_id = ${numericUserId}
+    LIMIT 1
+  `;
+
+  if (rows.length === 0) {
+    throw new Error("User presence not found");
+  }
+
+  return rows[0];
+};
+
+const getMatchedUserIds = async (userId: string): Promise<string[]> => {
+  const numericUserId = Number(userId);
+
+  const rows = await prisma.$queryRaw<Array<{ other_user_id: bigint }>>`
+    SELECT
+      CASE
+        WHEN user1_id = ${numericUserId} THEN user2_id
+        ELSE user1_id
+      END AS other_user_id
+    FROM matches
+    WHERE
+      is_active = 1
+      AND (
+        user1_id = ${numericUserId}
+        OR user2_id = ${numericUserId}
+      )
+  `;
+
+  return rows.map((row) => String(row.other_user_id));
+};
+
+const areActiveMatches = async (
+  userId: string,
+  otherUserId: string
+): Promise<boolean> => {
+  const currentId = Number(userId);
+  const otherId = Number(otherUserId);
+
+  const rows = await prisma.$queryRaw<Array<{ matched: number }>>`
+    SELECT 1 AS matched
+    FROM matches
+    WHERE
+      is_active = 1
+      AND (
+        (user1_id = ${currentId} AND user2_id = ${otherId})
+        OR
+        (user1_id = ${otherId} AND user2_id = ${currentId})
+      )
+    LIMIT 1
+  `;
+
+  return rows.length > 0;
+};
+
+const broadcastPresence = async (
+  io: Server,
+  userId: string,
+  presence: PresenceRecord
+): Promise<void> => {
+  const matchedUserIds = await getMatchedUserIds(userId);
+  const payload = formatPresence(presence);
+
+  for (const matchedUserId of matchedUserIds) {
+    io.to(getUserRoom(matchedUserId)).emit(
+      "presence:update",
+      payload
+    );
+  }
 };
 
 const getOtherUserId = async (
-  userId: string,
-  conversationId: string
+  conversationId: number,
+  currentUserId: string
 ): Promise<string> => {
+  const currentUserIdNumber = Number(currentUserId);
+
+  if (
+    !Number.isInteger(currentUserIdNumber) ||
+    currentUserIdNumber <= 0
+  ) {
+    throw new Error("Invalid authenticated user");
+  }
+
   const rows = await prisma.$queryRaw<
     Array<{
       user1_id: bigint;
@@ -55,34 +259,41 @@ const getOtherUserId = async (
     FROM conversations c
     INNER JOIN matches m
       ON m.id = c.match_id
-    WHERE c.id = ${BigInt(conversationId)}
-      AND (
-        m.user1_id = ${BigInt(userId)}
-        OR m.user2_id = ${BigInt(userId)}
-      )
-      AND m.is_active = TRUE
+    WHERE
+      c.id = ${conversationId}
+      AND m.is_active = 1
     LIMIT 1
   `;
 
   if (rows.length === 0) {
     throw new Error(
-      "Conversation not found or access denied"
+      "Conversation or active match not found"
     );
   }
 
-  const match = rows[0];
+  const user1Id = Number(rows[0].user1_id);
+  const user2Id = Number(rows[0].user2_id);
 
-  return (
-    match.user1_id === BigInt(userId)
-      ? match.user2_id.toString()
-      : match.user1_id.toString()
+  if (user1Id === currentUserIdNumber) {
+    return String(user2Id);
+  }
+
+  if (user2Id === currentUserIdNumber) {
+    return String(user1Id);
+  }
+
+  throw new Error(
+    "You are not a participant of this conversation"
   );
 };
 
 const isBlocked = async (
-  userId: string,
+  currentUserId: string,
   otherUserId: string
 ): Promise<boolean> => {
+  const currentId = Number(currentUserId);
+  const otherId = Number(otherUserId);
+
   const rows = await prisma.$queryRaw<
     Array<{ blocked: number }>
   >`
@@ -90,13 +301,13 @@ const isBlocked = async (
     FROM blocks
     WHERE
       (
-        blocker_id = ${BigInt(userId)}
-        AND blocked_id = ${BigInt(otherUserId)}
+        blocker_id = ${currentId}
+        AND blocked_id = ${otherId}
       )
       OR
       (
-        blocker_id = ${BigInt(otherUserId)}
-        AND blocked_id = ${BigInt(userId)}
+        blocker_id = ${otherId}
+        AND blocked_id = ${currentId}
       )
     LIMIT 1
   `;
@@ -106,53 +317,88 @@ const isBlocked = async (
 
 const authenticateSocket = (
   socket: AuthenticatedSocket
-): string => {
+): void => {
   const authToken =
     typeof socket.handshake.auth?.token === "string"
       ? socket.handshake.auth.token
       : "";
 
   const authorizationHeader =
-    typeof socket.handshake.headers.authorization === "string"
+    typeof socket.handshake.headers?.authorization ===
+    "string"
       ? socket.handshake.headers.authorization
       : "";
 
   let token = authToken;
 
-  if (!token && authorizationHeader.startsWith("Bearer ")) {
-    token = authorizationHeader.substring(7).trim();
+  if (
+    !token &&
+    authorizationHeader.startsWith("Bearer ")
+  ) {
+    token = authorizationHeader
+      .substring(7)
+      .trim();
   }
 
   if (!token) {
-    throw new Error("Authentication token is required");
+    throw new Error(
+      "Authentication token is required"
+    );
   }
 
   const payload = verifyToken(token);
 
-  if (!payload.userId) {
-    throw new Error("Invalid authentication token");
-  }
-
-  return payload.userId;
+  socket.userId = payload.userId;
 };
 
+const emitTypingToConversation = (
+  socket: AuthenticatedSocket,
+  conversationId: number,
+  eventName: "typing:start" | "typing:stop"
+): void => {
+  const room =
+    getConversationRoom(conversationId);
+
+  socket.to(room).emit(eventName, {
+    conversationId,
+    userId: socket.userId,
+  });
+};
+
+/**
+ * Register Nexora Chat Socket.IO events.
+ */
 export const registerChatSocket = (
   io: Server
-) => {
+): void => {
+  /**
+   * REALTIME NOTIFICATION EMITTER
+   *
+   * notification.service.ts owns persistence.
+   * This emitter only delivers the already-saved
+   * notification to the user's personal room.
+   */
+  setNotificationEmitter((userId, notification) => {
+    io.to(getUserRoom(userId)).emit(
+      "notification:new",
+      notification
+    );
+  });
+
+  /**
+   * SOCKET AUTHENTICATION
+   */
   io.use((socket, next) => {
     try {
       const authenticatedSocket =
         socket as AuthenticatedSocket;
 
-      const userId =
-        authenticateSocket(authenticatedSocket);
-
-      authenticatedSocket.userId = userId;
+      authenticateSocket(authenticatedSocket);
 
       next();
     } catch (error) {
       console.error(
-        "Socket authentication error:",
+        "❌ Socket authentication error:",
         error
       );
 
@@ -164,34 +410,120 @@ export const registerChatSocket = (
     }
   });
 
+  /**
+   * SOCKET CONNECTION
+   */
   io.on(
     "connection",
-    (socket) => {
-      const authenticatedSocket =
-        socket as AuthenticatedSocket;
+    (rawSocket) => {
+      const socket =
+        rawSocket as AuthenticatedSocket;
 
-      const userId =
-        authenticatedSocket.userId;
-
-      if (!userId) {
+      if (!socket.userId) {
         socket.disconnect(true);
         return;
       }
 
+      const userId = socket.userId;
+
       console.log(
-        `🔌 Socket connected: User ${userId} (${socket.id})`
+        `🔌 Socket connected | userId=${userId} | socketId=${socket.id}`
       );
 
-      // Personal room.
-      socket.join(`user:${userId}`);
+      /**
+       * Personal room.
+       *
+       * This room can be used later for:
+       * - notifications
+       * - new matches
+       * - online status
+       * - date invites
+       *
+       * IMPORTANT:
+       * We do NOT send message:new here.
+       * Otherwise a user inside the conversation
+       * room can receive the same message twice.
+       */
+      socket.join(getUserRoom(userId));
 
-      socket.emit("socket:connected", {
-        success: true,
-        userId: Number(userId),
-        socketId: socket.id,
-        message:
-          "Real-time connection established",
-      });
+      void (async () => {
+        try {
+          await setUserOnline(userId);
+          const presence = await getUserPresence(userId);
+
+          socket.emit("presence:update", formatPresence(presence));
+          await broadcastPresence(io, userId, presence);
+
+          console.log(`🟢 User ${userId} is online`);
+        } catch (error) {
+          console.error("❌ Presence online error:", error);
+        }
+      })();
+
+      socket.emit(
+        "socket:connected",
+        {
+          success: true,
+          userId,
+          socketId: socket.id,
+          message:
+            "Real-time connection established",
+        }
+      );
+
+      /**
+       * GET USER PRESENCE
+       */
+      socket.on(
+        "presence:get",
+        async (
+          payload: PresencePayload,
+          callback?: (response: unknown) => void
+        ) => {
+          try {
+            const targetUserId = normalizeUserId(payload?.userId);
+
+            if (targetUserId !== userId) {
+              const matched = await areActiveMatches(
+                userId,
+                targetUserId
+              );
+
+              if (!matched) {
+                throw new Error(
+                  "Presence is available only for active matches"
+                );
+              }
+            }
+
+            const presence = await getUserPresence(targetUserId);
+            const response = {
+              success: true,
+              presence: formatPresence(presence),
+            };
+
+            socket.emit("presence:status", response.presence);
+
+            if (callback) {
+              callback(response);
+            }
+          } catch (error) {
+            const message =
+              error instanceof Error
+                ? error.message
+                : "Failed to get user presence";
+
+            console.error("❌ presence:get error:", error);
+
+            if (callback) {
+              callback({
+                success: false,
+                message,
+              });
+            }
+          }
+        }
+      );
 
       /**
        * JOIN CONVERSATION
@@ -199,8 +531,10 @@ export const registerChatSocket = (
       socket.on(
         "conversation:join",
         async (
-          payload: JoinConversationPayload,
-          callback?: (response: unknown) => void
+          payload: ConversationPayload,
+          callback?: (
+            response: unknown
+          ) => void
         ) => {
           try {
             const conversationId =
@@ -210,60 +544,70 @@ export const registerChatSocket = (
 
             const otherUserId =
               await getOtherUserId(
-                userId,
-                conversationId
+                conversationId,
+                userId
               );
 
-            if (
+            const blocked =
               await isBlocked(
                 userId,
                 otherUserId
-              )
-            ) {
+              );
+
+            if (blocked) {
               throw new Error(
-                "Conversation is unavailable because one of the users is blocked"
+                "Messaging is unavailable because one of the users is blocked"
               );
             }
 
             const room =
-              `conversation:${conversationId}`;
+              getConversationRoom(
+                conversationId
+              );
 
-            socket.join(room);
+            await socket.join(room);
+
+            const otherPresence = await getUserPresence(otherUserId);
+
+            socket.emit(
+              "presence:status",
+              formatPresence(otherPresence)
+            );
+
+            const response = {
+              success: true,
+              conversationId,
+            };
 
             socket.emit(
               "conversation:joined",
-              {
-                success: true,
-                conversationId:
-                  Number(conversationId),
-              }
+              response
             );
 
-            callback?.({
-              success: true,
-              conversationId:
-                Number(conversationId),
-            });
+            if (callback) {
+              callback(response);
+            }
+
+            console.log(
+              `💬 User ${userId} joined conversation ${conversationId}`
+            );
           } catch (error) {
             const message =
               error instanceof Error
                 ? error.message
-                : "Unable to join conversation";
+                : "Failed to join conversation";
 
-            socket.emit(
-              "conversation:error",
-              {
-                success: false,
-                event:
-                  "conversation:join",
-                message,
-              }
+            console.error(
+              "❌ conversation:join error:",
+              error
             );
 
-            callback?.({
-              success: false,
-              message,
-            });
+            if (callback) {
+              callback({
+                success: false,
+                message,
+              });
+            }
           }
         }
       );
@@ -273,9 +617,11 @@ export const registerChatSocket = (
        */
       socket.on(
         "conversation:leave",
-        (
-          payload: JoinConversationPayload,
-          callback?: (response: unknown) => void
+        async (
+          payload: ConversationPayload,
+          callback?: (
+            response: unknown
+          ) => void
         ) => {
           try {
             const conversationId =
@@ -284,49 +630,60 @@ export const registerChatSocket = (
               );
 
             const room =
-              `conversation:${conversationId}`;
+              getConversationRoom(
+                conversationId
+              );
 
-            socket.leave(room);
+            await socket.leave(room);
+
+            const response = {
+              success: true,
+              conversationId,
+            };
 
             socket.emit(
               "conversation:left",
-              {
-                success: true,
-                conversationId:
-                  Number(conversationId),
-              }
+              response
             );
 
-            callback?.({
-              success: true,
-              conversationId:
-                Number(conversationId),
-            });
+            if (callback) {
+              callback(response);
+            }
+
+            console.log(
+              `🚪 User ${userId} left conversation ${conversationId}`
+            );
           } catch (error) {
             const message =
               error instanceof Error
                 ? error.message
-                : "Unable to leave conversation";
+                : "Failed to leave conversation";
 
-            callback?.({
-              success: false,
-              message,
-            });
+            console.error(
+              "❌ conversation:leave error:",
+              error
+            );
+
+            if (callback) {
+              callback({
+                success: false,
+                message,
+              });
+            }
           }
         }
       );
 
       /**
        * SEND MESSAGE
-       *
-       * REST API ke same service ko use karta hai,
-       * isliye validation/business logic duplicate nahi hota.
        */
       socket.on(
         "message:send",
         async (
-          payload: SendMessagePayload,
-          callback?: (response: unknown) => void
+          payload: MessageSendPayload,
+          callback?: (
+            response: unknown
+          ) => void
         ) => {
           try {
             const conversationId =
@@ -336,78 +693,122 @@ export const registerChatSocket = (
 
             const otherUserId =
               await getOtherUserId(
-                userId,
-                conversationId
+                conversationId,
+                userId
               );
 
-            if (
+            const blocked =
               await isBlocked(
                 userId,
                 otherUserId
-              )
-            ) {
+              );
+
+            if (blocked) {
               throw new Error(
-                "Message cannot be sent because one of the users is blocked"
+                "Messaging is unavailable because one of the users is blocked"
               );
             }
 
-            const message =
+            const messageType =
+              payload?.type || "text";
+
+            if (
+              ![
+                "text",
+                "image",
+                "voice",
+              ].includes(messageType)
+            ) {
+              throw new Error(
+                "Invalid message type"
+              );
+            }
+
+            if (
+              messageType === "text" &&
+              !payload?.content?.trim()
+            ) {
+              throw new Error(
+                "Message content is required"
+              );
+            }
+
+            const result =
               await sendMessage(
                 userId,
-                conversationId,
+                String(conversationId),
                 {
-                  type:
-                    payload?.type ?? "text",
+                  type: messageType,
                   content:
-                    payload?.content ?? null,
+                    payload?.content ??
+                    null,
                   mediaUrl:
-                    payload?.mediaUrl ?? null,
+                    payload?.mediaUrl ??
+                    null,
                 }
               );
 
-            const room =
-              `conversation:${conversationId}`;
+            const eventPayload = {
+              success: true,
+              message: result,
+            };
 
-            // Current sender ke conversation room mein.
+            const room =
+              getConversationRoom(
+                conversationId
+              );
+
+            /**
+             * IMPORTANT:
+             *
+             * message:new is emitted ONLY
+             * to the conversation room.
+             *
+             * Previously the event was also
+             * emitted to user:${otherUserId},
+             * which caused duplicate messages.
+             */
             io.to(room).emit(
               "message:new",
-              {
-                success: true,
-                message,
-              }
+              eventPayload
             );
 
-            // Receiver ke personal room mein bhi emit.
-            io.to(`user:${otherUserId}`).emit(
-              "message:new",
-              {
-                success: true,
-                message,
-              }
-            );
+            /**
+             * Sender acknowledgement.
+             *
+             * This is separate from message:new.
+             */
+            if (callback) {
+              callback(eventPayload);
+            }
 
-            callback?.({
-              success: true,
-              message,
-            });
+            console.log(
+              `📨 Message ${result.id} sent by user ${userId} in conversation ${conversationId}`
+            );
           } catch (error) {
             const message =
               error instanceof Error
                 ? error.message
-                : "Unable to send message";
+                : "Failed to send message";
+
+            console.error(
+              "❌ message:send error:",
+              error
+            );
+
+            const errorPayload = {
+              success: false,
+              message,
+            };
 
             socket.emit(
               "message:error",
-              {
-                success: false,
-                message,
-              }
+              errorPayload
             );
 
-            callback?.({
-              success: false,
-              message,
-            });
+            if (callback) {
+              callback(errorPayload);
+            }
           }
         }
       );
@@ -418,8 +819,10 @@ export const registerChatSocket = (
       socket.on(
         "message:read",
         async (
-          payload: ReadMessagePayload,
-          callback?: (response: unknown) => void
+          payload: MessageReadPayload,
+          callback?: (
+            response: unknown
+          ) => void
         ) => {
           try {
             const conversationId =
@@ -429,58 +832,88 @@ export const registerChatSocket = (
 
             const otherUserId =
               await getOtherUserId(
-                userId,
-                conversationId
+                conversationId,
+                userId
               );
+
+            const blocked =
+              await isBlocked(
+                userId,
+                otherUserId
+              );
+
+            if (blocked) {
+              throw new Error(
+                "Messaging is unavailable because one of the users is blocked"
+              );
+            }
 
             const result =
               await markConversationAsRead(
                 userId,
+                String(conversationId)
+              );
+
+            const response = {
+              success: true,
+              conversationId,
+              markedAsRead:
+                result.markedAsRead,
+            };
+
+            const room =
+              getConversationRoom(
                 conversationId
               );
 
-            const eventData = {
-              success: true,
-              conversationId:
-                Number(conversationId),
-              markedAsRead:
-                result.markedAsRead,
-              readerId: Number(userId),
-            };
-
-            io.to(
-              `user:${otherUserId}`
-            ).emit(
-              "message:read",
-              eventData
-            );
+            socket
+              .to(room)
+              .emit(
+                "message:read",
+                {
+                  conversationId,
+                  userId,
+                  markedAsRead:
+                    result.markedAsRead,
+                }
+              );
 
             socket.emit(
               "message:read:success",
-              eventData
+              response
             );
 
-            callback?.(eventData);
+            if (callback) {
+              callback(response);
+            }
+
+            console.log(
+              `✓ User ${userId} marked ${result.markedAsRead} messages as read in conversation ${conversationId}`
+            );
           } catch (error) {
             const message =
               error instanceof Error
                 ? error.message
-                : "Unable to mark messages as read";
+                : "Failed to mark messages as read";
+
+            console.error(
+              "❌ message:read error:",
+              error
+            );
+
+            const errorPayload = {
+              success: false,
+              message,
+            };
 
             socket.emit(
               "message:error",
-              {
-                success: false,
-                event:
-                  "message:read",
-                message,
-              }
+              errorPayload
             );
 
-            callback?.({
-              success: false,
-              message,
-            });
+            if (callback) {
+              callback(errorPayload);
+            }
           }
         }
       );
@@ -501,31 +934,30 @@ export const registerChatSocket = (
 
             const otherUserId =
               await getOtherUserId(
-                userId,
-                conversationId
+                conversationId,
+                userId
               );
 
-            if (
+            const blocked =
               await isBlocked(
                 userId,
                 otherUserId
-              )
-            ) {
+              );
+
+            if (blocked) {
               return;
             }
 
-            io.to(
-              `user:${otherUserId}`
-            ).emit(
-              "typing:start",
-              {
-                conversationId:
-                  Number(conversationId),
-                userId: Number(userId),
-              }
+            emitTypingToConversation(
+              socket,
+              conversationId,
+              "typing:start"
             );
-          } catch {
-            // Typing events are non-critical.
+          } catch (error) {
+            console.error(
+              "❌ typing:start error:",
+              error
+            );
           }
         }
       );
@@ -546,31 +978,30 @@ export const registerChatSocket = (
 
             const otherUserId =
               await getOtherUserId(
-                userId,
-                conversationId
+                conversationId,
+                userId
               );
 
-            if (
+            const blocked =
               await isBlocked(
                 userId,
                 otherUserId
-              )
-            ) {
+              );
+
+            if (blocked) {
               return;
             }
 
-            io.to(
-              `user:${otherUserId}`
-            ).emit(
-              "typing:stop",
-              {
-                conversationId:
-                  Number(conversationId),
-                userId: Number(userId),
-              }
+            emitTypingToConversation(
+              socket,
+              conversationId,
+              "typing:stop"
             );
-          } catch {
-            // Typing events are non-critical.
+          } catch (error) {
+            console.error(
+              "❌ typing:stop error:",
+              error
+            );
           }
         }
       );
@@ -581,9 +1012,34 @@ export const registerChatSocket = (
       socket.on(
         "disconnect",
         (reason) => {
-          console.log(
-            `🔌 Socket disconnected: User ${userId} (${socket.id}) — ${reason}`
-          );
+          void (async () => {
+            try {
+              const userRoom = getUserRoom(userId);
+              const remainingSockets = await io
+                .in(userRoom)
+                .fetchSockets();
+
+              if (remainingSockets.length > 0) {
+                console.log(
+                  `🔌 Socket disconnected | userId=${userId} | socketId=${socket.id} | reason=${reason} | other sockets still active=${remainingSockets.length}`
+                );
+                return;
+              }
+
+              const presence = await setUserOffline(userId);
+              await broadcastPresence(io, userId, presence);
+
+              console.log(
+                `🔴 User ${userId} is offline | lastSeen=${presence.last_seen_at?.toISOString() ?? "null"}`
+              );
+            } catch (error) {
+              console.error("❌ Presence offline error:", error);
+            }
+
+            console.log(
+              `🔌 Socket disconnected | userId=${userId} | socketId=${socket.id} | reason=${reason}`
+            );
+          })();
         }
       );
     }

@@ -131,7 +131,7 @@ export const getConversationController =
       const conversation =
         await getConversation(
           userId,
-          conversationId
+          String(conversationId)
         );
 
       return res.status(200).json({
@@ -184,7 +184,7 @@ export const sendMessageController =
       const message =
         await sendMessage(
           userId,
-          conversationId,
+          String(conversationId),
           {
             type,
             content,
@@ -244,7 +244,7 @@ export const getMessagesController =
       const result =
         await getMessages(
           userId,
-          conversationId,
+          String(conversationId),
           page,
           limit
         );
@@ -293,7 +293,7 @@ export const markConversationAsReadController =
       const result =
         await markConversationAsRead(
           userId,
-          conversationId
+          String(conversationId)
         );
 
       return res.status(200).json({
