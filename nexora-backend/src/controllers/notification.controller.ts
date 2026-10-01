@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+
 import {
   getUserNotifications,
   getUnreadNotificationCount,
@@ -6,193 +7,309 @@ import {
   markAllNotificationsAsRead,
 } from "../services/notification.service";
 
-const getAuthenticatedUserId = (req: Request): string => {
+// =========================
+// Helpers
+// =========================
+
+const getAuthenticatedUserId = (
+  req: Request,
+  res: Response
+): string | null => {
   if (!req.userId) {
-    throw new Error("Authentication required");
+    res.status(401).json({
+      success: false,
+      message: "Authentication required",
+    });
+
+    return null;
   }
 
   return req.userId;
 };
 
-/**
- * GET /api/notifications
- */
+const parseQueryInteger = (
+  value: unknown,
+  defaultValue: number,
+  min: number,
+  max: number,
+  fieldName: string
+): number => {
+  if (value === undefined) {
+    return defaultValue;
+  }
+
+  if (
+    typeof value !== "string" ||
+    value.trim() === ""
+  ) {
+    throw new Error(
+      `${fieldName} must be an integer between ${min} and ${max}`
+    );
+  }
+
+  const parsed = Number(value);
+
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < min ||
+    parsed > max
+  ) {
+    throw new Error(
+      `${fieldName} must be an integer between ${min} and ${max}`
+    );
+  }
+
+  return parsed;
+};
+
+const getNotificationId = (
+  req: Request,
+  res: Response
+): string | null => {
+  const { notificationId } = req.params;
+
+  if (
+    typeof notificationId !== "string" ||
+    !notificationId.trim()
+  ) {
+    res.status(400).json({
+      success: false,
+      message: "Valid notification ID is required",
+    });
+
+    return null;
+  }
+
+  return notificationId;
+};
+
+// =========================
+// Get Notifications
+// =========================
+
 export const getNotificationsController = async (
   req: Request,
   res: Response
 ) => {
   try {
-    const userId = getAuthenticatedUserId(req);
-
-    const limit = Number(req.query.limit ?? 20);
-    const offset = Number(req.query.offset ?? 0);
-
-    const notifications = await getUserNotifications(
-      userId,
-      limit,
-      offset
+    const userId = getAuthenticatedUserId(
+      req,
+      res
     );
 
-    return res.status(200).json({
-      success: true,
-      data: notifications,
-    });
-  } catch (error) {
-    console.error("Get notifications error:", error);
-
-    if (
-      error instanceof Error &&
-      error.message === "Authentication required"
-    ) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required",
-      });
+    if (!userId) {
+      return;
     }
 
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch notifications",
-    });
-  }
-};
+    const page = parseQueryInteger(
+      req.query.page,
+      1,
+      1,
+      10000,
+      "page"
+    );
 
-/**
- * GET /api/notifications/unread-count
- */
-export const getUnreadNotificationCountController = async (
-  req: Request,
-  res: Response
-) => {
-  try {
-    const userId = getAuthenticatedUserId(req);
+    const limit = parseQueryInteger(
+      req.query.limit,
+      20,
+      1,
+      100,
+      "limit"
+    );
 
-    const count = await getUnreadNotificationCount(userId);
+    const notifications =
+      await getUserNotifications(
+        userId,
+        page,
+        limit
+      );
 
     return res.status(200).json({
       success: true,
-      data: {
-        unreadCount: count,
+      message:
+        "Notifications fetched successfully",
+      data: notifications,
+      pagination: {
+        page,
+        limit,
+        count: notifications.length,
+        hasMore: notifications.length === limit,
       },
     });
   } catch (error) {
     console.error(
-      "Get unread notification count error:",
+      "Get notifications error:",
       error
     );
-
-    if (
-      error instanceof Error &&
-      error.message === "Authentication required"
-    ) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required",
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch unread notification count",
-    });
-  }
-};
-
-/**
- * PATCH /api/notifications/:notificationId/read
- */
-export const markNotificationAsReadController = async (
-  req: Request,
-  res: Response
-) => {
-  try {
-    const userId = getAuthenticatedUserId(req);
-    const notificationId = String(req.params.notificationId);
-
-    const notification = await markNotificationAsRead(
-      userId,
-      notificationId
-    );
-
-    return res.status(200).json({
-      success: true,
-      message: "Notification marked as read",
-      data: notification,
-    });
-  } catch (error) {
-    console.error(
-      "Mark notification as read error:",
-      error
-    );
-
-    if (
-      error instanceof Error &&
-      error.message === "Authentication required"
-    ) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required",
-      });
-    }
 
     const message =
       error instanceof Error
         ? error.message
-        : "Failed to mark notification as read";
+        : "Failed to fetch notifications";
 
-    if (message === "Notification not found") {
-      return res.status(404).json({
+    return res.status(400).json({
+      success: false,
+      message,
+    });
+  }
+};
+
+// =========================
+// Get Unread Notification Count
+// =========================
+
+export const getUnreadNotificationCountController =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    try {
+      const userId =
+        getAuthenticatedUserId(
+          req,
+          res
+        );
+
+      if (!userId) {
+        return;
+      }
+
+      const unreadCount =
+        await getUnreadNotificationCount(
+          userId
+        );
+
+      return res.status(200).json({
+        success: true,
+        message:
+          "Unread notification count fetched successfully",
+        data: {
+          unreadCount,
+        },
+      });
+    } catch (error) {
+      console.error(
+        "Get unread notification count error:",
+        error
+      );
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to fetch unread notification count";
+
+      return res.status(400).json({
         success: false,
         message,
       });
     }
+  };
 
-    return res.status(500).json({
-      success: false,
-      message: "Failed to mark notification as read",
-    });
-  }
-};
+// =========================
+// Mark Notification As Read
+// =========================
 
-/**
- * PATCH /api/notifications/read-all
- */
-export const markAllNotificationsAsReadController = async (
-  req: Request,
-  res: Response
-) => {
-  try {
-    const userId = getAuthenticatedUserId(req);
+export const markNotificationAsReadController =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    try {
+      const userId =
+        getAuthenticatedUserId(
+          req,
+          res
+        );
 
-    const updatedCount =
-      await markAllNotificationsAsRead(userId);
+      if (!userId) {
+        return;
+      }
 
-    return res.status(200).json({
-      success: true,
-      message: "All notifications marked as read",
-      data: {
-        updatedCount,
-      },
-    });
-  } catch (error) {
-    console.error(
-      "Mark all notifications as read error:",
-      error
-    );
+      const notificationId =
+        getNotificationId(
+          req,
+          res
+        );
 
-    if (
-      error instanceof Error &&
-      error.message === "Authentication required"
-    ) {
-      return res.status(401).json({
+      if (!notificationId) {
+        return;
+      }
+
+      const notification =
+        await markNotificationAsRead(
+          userId,
+          notificationId
+        );
+
+      return res.status(200).json({
+        success: true,
+        message:
+          "Notification marked as read",
+        data: notification,
+      });
+    } catch (error) {
+      console.error(
+        "Mark notification as read error:",
+        error
+      );
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to mark notification as read";
+
+      return res.status(400).json({
         success: false,
-        message: "Authentication required",
+        message,
       });
     }
+  };
 
-    return res.status(500).json({
-      success: false,
-      message: "Failed to mark all notifications as read",
-    });
-  }
-};
+// =========================
+// Mark All Notifications As Read
+// =========================
+
+export const markAllNotificationsAsReadController =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    try {
+      const userId =
+        getAuthenticatedUserId(
+          req,
+          res
+        );
+
+      if (!userId) {
+        return;
+      }
+
+      const result =
+        await markAllNotificationsAsRead(
+          userId
+        );
+
+      return res.status(200).json({
+        success: true,
+        message:
+          "All notifications marked as read",
+        data: result,
+      });
+    } catch (error) {
+      console.error(
+        "Mark all notifications as read error:",
+        error
+      );
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to mark all notifications as read";
+
+      return res.status(400).json({
+        success: false,
+        message,
+      });
+    }
+  };
