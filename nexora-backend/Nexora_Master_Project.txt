@@ -1,0 +1,598 @@
+# NEXORA — BACKEND DEVELOPMENT PROMPT
+
+Build a complete, production-ready backend for **Nexora**, a modern dating/social connection application.
+
+## Tech Stack
+
+* Node.js
+* Express.js
+* TypeScript
+* MySQL
+* Prisma ORM
+* JWT Authentication
+* OTP-based Authentication
+* Socket.IO for real-time communication
+* REST APIs
+* dotenv
+* CORS
+* bcrypt where required
+* Proper centralized error handling
+* Clean modular architecture
+
+---
+
+# 1. Backend Foundation
+
+Create a clean and scalable backend architecture with:
+
+```text
+src/
+├── config/
+├── controllers/
+├── middlewares/
+├── routes/
+├── services/
+├── utils/
+├── sockets/
+└── app.ts
+```
+
+Requirements:
+
+* Environment variable configuration
+* MySQL database connection
+* Prisma integration
+* CORS
+* JSON parsing
+* Centralized error handling
+* Standard API response format
+* Health check API
+* Database health check API
+* Proper TypeScript typing
+* Development and production scripts
+
+---
+
+# 2. Authentication
+
+Implement OTP-based authentication.
+
+### APIs
+
+```http
+POST /api/auth/send-otp
+POST /api/auth/verify-otp
+GET  /api/auth/me
+POST /api/auth/logout
+```
+
+Requirements:
+
+* Mobile/phone based authentication
+* OTP generation
+* OTP verification
+* OTP expiry
+* Prevent invalid/expired OTP usage
+* Create user after successful verification
+* JWT access token
+* Authentication middleware
+* Protected routes
+* Current-user API
+* Secure logout/token handling
+
+---
+
+# 3. User Profile
+
+Create a complete dating profile system.
+
+Profile should support:
+
+* Name
+* Date of birth
+* Gender
+* Looking for
+* Relationship goal
+* Bio
+* Height
+* City
+* Profile completion status
+
+APIs should support:
+
+* Create profile
+* Get profile
+* Update profile
+* Profile completion validation
+
+A profile should become discoverable only after the required profile information is completed.
+
+---
+
+# 4. Profile Photos
+
+Implement a multi-photo profile system.
+
+Features:
+
+* Add photo
+* Get photos
+* Set primary photo
+* Delete photo
+* Photo ordering
+* Validate ownership
+* Prevent unauthorized photo manipulation
+
+---
+
+# 5. Interests
+
+Create an interest system.
+
+Examples:
+
+```text
+Art
+Books
+Cooking
+Dancing
+Fitness
+Food
+Gaming
+Music
+Travel
+Technology
+Movies
+Sports
+```
+
+Features:
+
+* Get available interests
+* Add interests to profile
+* Remove interests
+* Get user's interests
+* Prevent duplicate interests
+
+---
+
+# 6. Discover System
+
+Build the main dating discovery engine.
+
+Users should be able to discover compatible profiles.
+
+Discovery should consider:
+
+* Profile completion
+* Gender preference
+* Relationship goal
+* Age/preferences where applicable
+* Interests
+* Existing swipes
+* Existing matches
+* Blocked users
+* Own profile
+* Pagination
+
+API:
+
+```http
+GET /api/discover
+```
+
+Return profile information suitable for the frontend discovery cards.
+
+---
+
+# 7. Swipe System
+
+Implement:
+
+```text
+Like
+Pass
+Super Like
+```
+
+API:
+
+```http
+POST /api/swipes/:targetUserId
+```
+
+Example:
+
+```json
+{
+  "action": "like"
+}
+```
+
+Requirements:
+
+* Prevent self-swipe
+* Prevent invalid users
+* Prevent blocked-user interaction
+* Prevent duplicate/invalid swipe behaviour
+* Track swipe history
+* Daily free-user selection limit
+* Free plan limit: **10 selections per day**
+* Return remaining selection count
+* Reset daily usage
+* Support like/pass/superlike
+
+---
+
+# 8. Matching System
+
+Create a mutual-like matching system.
+
+When:
+
+```text
+User A → Like → User B
+
+User B → Like → User A
+```
+
+Create a match.
+
+Requirements:
+
+* Prevent duplicate matches
+* Store match date
+* Active/inactive match status
+* Get user's matches
+* Match details
+* Match notifications
+
+API:
+
+```http
+GET /api/matches
+```
+
+---
+
+# 9. Real-Time Chat
+
+Implement real-time chat using:
+
+```text
+Socket.IO
+```
+
+Features:
+
+* One-to-one conversations
+* Create conversation from match
+* Send messages
+* Receive messages in real time
+* Message history
+* Read receipts
+* Typing indicator
+* Online/offline presence
+* Last seen
+* Conversation rooms
+* JWT socket authentication
+
+REST APIs:
+
+```http
+POST /api/conversations
+GET  /api/conversations
+GET  /api/conversations/:conversationId
+POST /api/conversations/:conversationId/messages
+GET  /api/conversations/:conversationId/messages
+PATCH /api/conversations/:conversationId/read
+```
+
+Socket events should include concepts such as:
+
+```text
+message:send
+message:new
+message:read
+typing:start
+typing:stop
+presence:update
+conversation:join
+conversation:leave
+```
+
+---
+
+# 10. Notifications
+
+Create a persistent notification system.
+
+Notification types:
+
+```text
+new_match
+new_message
+new_like
+system
+```
+
+Features:
+
+* Create notification
+* Get notifications
+* Pagination
+* Unread notification count
+* Mark notification as read
+* Mark all notifications as read
+* Persistent MySQL storage
+* Real-time notification delivery through Socket.IO
+
+APIs:
+
+```http
+GET   /api/notifications
+GET   /api/notifications/unread-count
+PATCH /api/notifications/:notificationId/read
+PATCH /api/notifications/read-all
+```
+
+---
+
+# 11. Date Planning / Date Invites
+
+Allow matched users to plan a date.
+
+Date types:
+
+```text
+coffee
+dinner
+movie
+walk
+other
+```
+
+Features:
+
+* Send date invite
+* Proposed date/time
+* Place name
+* Note
+* Accept invite
+* Decline invite
+* Cancel invite
+* Invite status
+* Notifications
+
+Statuses:
+
+```text
+pending
+accepted
+declined
+cancelled
+```
+
+Only active matches should be able to interact with each other.
+
+---
+
+# 12. Block System
+
+Implement user blocking.
+
+Features:
+
+* Block user
+* Unblock user
+* Get blocked users
+* Check whether users are blocked
+* Prevent discover interaction
+* Prevent swiping
+* Prevent chat interaction
+* Prevent date interaction
+
+API structure:
+
+```http
+POST   /api/blocks/:userId
+GET    /api/blocks
+DELETE /api/blocks/:userId
+```
+
+---
+
+# 13. Report System
+
+Allow users to report another user.
+
+Report reasons:
+
+```text
+fake
+harassment
+inappropriate
+scam
+other
+```
+
+Features:
+
+* Create report
+* Store report details
+* Report status
+* Prevent duplicate pending reports
+* Get user's submitted reports
+
+API:
+
+```http
+POST /api/reports/:userId
+GET  /api/reports
+```
+
+---
+
+# 14. Safety Rules
+
+The backend must enforce:
+
+* Users cannot interact with themselves
+* Blocked users cannot interact
+* Only matched users can chat
+* Only matched users can send date invites
+* Users can only modify their own profile/photos
+* Users can only read their own notifications
+* Users can only manage their own swipes
+* Proper JWT authentication
+* Input validation
+* SQL/ORM safety
+* Proper error responses
+* No sensitive information exposed in API responses
+
+---
+
+# 15. Database
+
+Design the MySQL database around entities such as:
+
+```text
+users
+otps
+profiles
+photos
+interests
+swipes
+matches
+conversations
+messages
+notifications
+date_invites
+blocks
+reports
+select_limits
+user_presence
+subscriptions
+plans
+```
+
+Use proper:
+
+* Primary keys
+* Foreign keys
+* Indexes
+* Unique constraints
+* Enums
+* Timestamps
+* Cascade behaviour where appropriate
+
+---
+
+# 16. API Response Standard
+
+Use consistent responses.
+
+Success:
+
+```json
+{
+  "success": true,
+  "message": "Operation successful",
+  "data": {}
+}
+```
+
+Error:
+
+```json
+{
+  "success": false,
+  "message": "Something went wrong"
+}
+```
+
+---
+
+# 17. Production Quality
+
+The backend should be:
+
+* Modular
+* Scalable
+* Maintainable
+* Secure
+* Properly typed
+* Easy to connect with React frontend
+* Ready for future premium features
+* Ready for real-time features
+* Easy to test through Postman
+
+Every feature should have:
+
+```text
+Route
+Controller
+Service
+Database interaction
+Validation
+Error handling
+```
+
+---
+
+# 18. Future/Premium Architecture
+
+Keep the backend architecture ready for future features such as:
+
+* Premium subscriptions
+* Plans
+* Payments
+* Premium discovery features
+* Advanced filters
+* Super likes
+* Increased daily limits
+* Profile boosts
+* Read receipts / advanced messaging features
+* Web/mobile clients
+
+---
+
+# Final Goal
+
+Build Nexora as a **complete modern dating/social backend** where the frontend can consume clean REST APIs and Socket.IO events.
+
+Core flow:
+
+```text
+OTP Login
+    ↓
+Create Profile
+    ↓
+Add Photos
+    ↓
+Select Interests
+    ↓
+Complete Profile
+    ↓
+Discover Users
+    ↓
+Like / Pass / Super Like
+    ↓
+Mutual Like
+    ↓
+Match
+    ↓
+Conversation
+    ↓
+Real-Time Chat
+    ↓
+Date Invite
+    ↓
+Accept / Decline
+    ↓
+Notifications
+    ↓
+Block / Report / Safety
+```
+
+The backend should be completed and thoroughly tested through Postman before starting the Nexora frontend.
