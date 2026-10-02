@@ -1,0 +1,12 @@
+Folder PATH listing for volume Windows
+Volume serial number is 0AFA-0987
+C:\NEXORA\NEXORA-FRONTEND\SRC\APP
+¦   explore.tsx
+¦   index.tsx
+¦   _layout.tsx
+¦   
++---onboarding
+        index.tsx
+        interests.tsx
+        preferences.tsx
+        
