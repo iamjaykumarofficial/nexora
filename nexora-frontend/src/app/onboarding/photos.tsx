@@ -13,6 +13,7 @@ import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { setSelectedPhotos } from "../../lib/photoStore";
 
 type PhotoItem = {
   id: string;
@@ -48,8 +49,7 @@ export default function PhotosScreen() {
         return;
       }
 
-      const remaining =
-        MAX_PHOTOS - photos.length;
+      const remaining = MAX_PHOTOS - photos.length;
 
       const result =
         await ImagePicker.launchImageLibraryAsync({
@@ -76,7 +76,17 @@ export default function PhotosScreen() {
           ...newPhotos,
         ];
 
-        return combined.slice(0, MAX_PHOTOS);
+        const finalPhotos = combined.slice(
+          0,
+          MAX_PHOTOS
+        );
+
+        console.log(
+          "🔥 PHOTOS NOW SELECTED:",
+          finalPhotos.map((photo) => photo.uri)
+        );
+
+        return finalPhotos;
       });
     } catch (error) {
       console.log(
@@ -134,15 +144,15 @@ export default function PhotosScreen() {
       photos.map((photo) => photo.uri)
     );
 
-    /*
-      Photo upload API will be connected here
-      after JWT/auth storage is connected.
+    setSelectedPhotos(photos);
 
-      The first photo in `photos` is always
-      considered the primary profile photo.
-    */
+    console.log(
+      "🔥 PHOTOS SAVED FOR PREVIEW:",
+      photos.map((photo) => photo.uri)
+    );
 
-    router.push("/onboarding/preview");
+    // ✅ Prompts screen pe jaayega
+    router.push("/onboarding/prompts");
   };
 
   return (

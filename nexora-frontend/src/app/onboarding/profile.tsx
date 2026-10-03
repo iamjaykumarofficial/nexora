@@ -1,6 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  AppState,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -11,6 +13,7 @@ import {
   View,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
+import * as Location from "expo-location";
 import { router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -98,6 +101,17 @@ export default function ProfileScreen() {
 
   const [city, setCity] =
     useState("");
+
+  const [stateName, setStateName] =
+    useState("");
+
+  const [country, setCountry] =
+    useState("");
+
+  const [locationLoading, setLocationLoading] =
+    useState(false);
+
+  const locationAttempted = useRef(false);
 
   const [bio, setBio] =
     useState("");
@@ -229,6 +243,163 @@ export default function ProfileScreen() {
     }
   };
 
+  const useCurrentLocation = async () => {
+    if (locationLoading) {
+      return;
+    }
+
+    try {
+      setLocationLoading(true);
+
+      const { status } =
+        await Location.requestForegroundPermissionsAsync();
+
+      if (status !== Location.PermissionStatus.GRANTED) {
+        console.log("⚠️ LOCATION PERMISSION NOT GRANTED");
+        return;
+      }
+
+      const servicesEnabled =
+        await Location.hasServicesEnabledAsync();
+
+      if (!servicesEnabled) {
+        console.log("⚠️ LOCATION SERVICES OFF");
+
+        if (Platform.OS === "android") {
+          try {
+            // Android system location settings directly open honge.
+            // User ko kisi extra button ki zarurat nahi hai.
+            await Linking.sendIntent(
+              "android.settings.LOCATION_SOURCE_SETTINGS"
+            );
+          } catch (error) {
+            console.log(
+              "⚠️ LOCATION SETTINGS COULD NOT OPEN:",
+              error
+            );
+          }
+        }
+
+        return;
+      }
+
+      const position =
+        await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+
+      const { latitude, longitude } = position.coords;
+
+      let detectedCity = "";
+      let detectedState = "";
+      let detectedCountry = "";
+
+      if (Platform.OS === "web") {
+        try {
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`,
+            {
+              headers: {
+                Accept: "application/json",
+              },
+            }
+          );
+
+          if (response.ok) {
+            const data = await response.json();
+            const address = data?.address ?? {};
+
+            detectedCity =
+              address.city ||
+              address.town ||
+              address.village ||
+              address.municipality ||
+              address.county ||
+              "";
+
+            detectedState = address.state || "";
+            detectedCountry = address.country || "";
+          }
+        } catch (error) {
+          console.log(
+            "⚠️ WEB CITY LOOKUP FAILED:",
+            error
+          );
+        }
+      } else {
+        const places =
+          await Location.reverseGeocodeAsync({
+            latitude,
+            longitude,
+          });
+
+        const place = places[0];
+
+        if (place) {
+          detectedCity =
+            place.city ||
+            place.subregion ||
+            place.district ||
+            "";
+
+          detectedState = place.region || "";
+          detectedCountry = place.country || "";
+        }
+      }
+
+      if (!detectedCity) {
+        console.log(
+          "⚠️ CURRENT LOCATION FOUND BUT CITY COULD NOT BE IDENTIFIED"
+        );
+        return;
+      }
+
+      setCity(detectedCity);
+      setStateName(detectedState);
+      setCountry(detectedCountry);
+
+      console.log("📍 CURRENT LOCATION DETECTED");
+      console.log("LATITUDE:", latitude);
+      console.log("LONGITUDE:", longitude);
+      console.log("CITY:", detectedCity);
+      console.log("STATE:", detectedState);
+      console.log("COUNTRY:", detectedCountry);
+    } catch (error) {
+      console.log(
+        "⚠️ LOCATION DETECTION FAILED:",
+        error
+      );
+    } finally {
+      setLocationLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener(
+      "change",
+      async (nextState) => {
+        if (nextState !== "active") {
+          return;
+        }
+
+        // User Android Location Settings se wapas aaye to
+        // automatically location dobara detect karo.
+        if (locationAttempted.current) {
+          const servicesEnabled =
+            await Location.hasServicesEnabledAsync();
+
+          if (servicesEnabled) {
+            await useCurrentLocation();
+          }
+        }
+      }
+    );
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
   const handleContinue = () => {
     if (!canContinue) {
       return;
@@ -266,6 +437,16 @@ export default function ProfileScreen() {
     console.log(
       "CITY:",
       city
+    );
+
+    console.log(
+      "STATE:",
+      stateName
+    );
+
+    console.log(
+      "COUNTRY:",
+      country
     );
 
     console.log(
@@ -582,18 +763,29 @@ export default function ProfileScreen() {
               </Text>
 
               <View
-                style={
-                  styles.inputWrapper
-                }
+                style={styles.inputWrapper}
               >
                 <TextInput
                   value={city}
-                  onChangeText={setCity}
+                  onFocus={() => {
+                    // City field par first interaction me hi
+                    // location permission / location services flow start hoga.
+                    if (!locationAttempted.current) {
+                      locationAttempted.current = true;
+                      useCurrentLocation();
+                    }
+                  }}
+                  onChangeText={(value) => {
+                    setCity(value);
+                    setStateName("");
+                    setCountry("");
+                  }}
                   placeholder="Bhopal"
                   placeholderTextColor="#A5ADA6"
                   style={styles.input}
                   maxLength={40}
                   autoCapitalize="words"
+                  autoCorrect={false}
                 />
               </View>
             </View>
@@ -1396,6 +1588,7 @@ const styles = StyleSheet.create({
     flex: 1.35,
   },
 
+
   bioHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1526,6 +1719,7 @@ const styles = StyleSheet.create({
       },
     ],
   },
+
 
   modalOverlay: {
     flex: 1,

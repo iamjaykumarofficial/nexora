@@ -1,12 +1,100 @@
 Folder PATH listing for volume Windows
 Volume serial number is 0AFA-0987
 C:\NEXORA\NEXORA-FRONTEND\SRC\APP
-¦   explore.tsx
-¦   index.tsx
-¦   _layout.tsx
-¦   
+ï¿½   explore.tsx
+ï¿½   index.tsx
+ï¿½   _layout.tsx
+ï¿½   
 +---onboarding
         index.tsx
         interests.tsx
         preferences.tsx
         
+
+            <View style={styles.introRow}>
+              <View style={styles.introCopy}>
+                <Text style={styles.kicker}>PREVIEW MODE</Text>
+                <Text style={styles.title}>This is how{'\n'}you'll be seen.</Text>
+                <Text style={styles.subtitle}>
+                  A little scroll. A little vibe check. Everything here can still be edited.
+                </Text>
+              </View>
+
+              <View style={styles.previewSeal}>
+                <Text style={styles.sealHeart}>â™¡</Text>
+                <Text style={styles.sealText}>YOUR{'\n'}VIBE</Text>
+              </View>
+            </View>
+
+            {/* HERO PROFILE */}
+            <View style={styles.heroCard}>
+              {photos.length > 0 ? (
+                <FlatList
+                  data={photos}
+                  keyExtractor={(item) => item.id}
+                  renderItem={renderPhoto}
+                  horizontal
+                  snapToInterval={PHOTO_WIDTH}
+                  snapToAlignment="start"
+                  decelerationRate="fast"
+                  showsHorizontalScrollIndicator={false}
+                  onMomentumScrollEnd={handlePhotoScroll}
+                  contentContainerStyle={styles.carouselContent}
+                  getItemLayout={(_data, index) => ({
+                    length: PHOTO_WIDTH,
+                    offset: PHOTO_WIDTH * index,
+                    index,
+                  })}
+                  nestedScrollEnabled
+                />
+              ) : (
+                <View style={styles.emptyPhoto}>
+                  <View style={styles.emptyIcon}>
+                    <Text style={styles.emptyIconText}>+</Text>
+                  </View>
+                  <Text style={styles.emptyPhotoText}>Add a photo to complete your profile</Text>
+                </View>
+              )}
+
+              <View style={styles.heroBottom}>
+                <View style={styles.heroIdentity}>
+                  <View style={styles.verifiedBadge}>
+                    <Text style={styles.verifiedText}>âœ“</Text>
+                  </View>
+                  <View style={styles.identityCopy}>
+                    <Text style={styles.name}>Jay, 24</Text>
+                    <Text style={styles.location}>Jabalpur Â· Madhya Pradesh</Text>
+                  </View>
+                </View>
+
+                <Pressable
+                  onPress={() => openFullScreen()}
+                  style={({ pressed }) => [
+                    styles.galleryButton,
+                    pressed && styles.iconPressed,
+                  ]}
+                >
+                  <Text style={styles.galleryIcon}>â›¶</Text>
+                </Pressable>
+              </View>
+            </View>
+
+            {/* PHOTO POSITION */}
+            {photos.length > 1 && (
+              <View style={styles.photoMeta}>
+                <View style={styles.indicators}>
+                  {photos.map((photo, index) => (
+                    <View
+                      key={photo.id}
+                      style={[
+                        styles.indicator,
+                        index === currentIndex && styles.activeIndicator,
+                      ]}
+                    />
+                  ))}
+                </View>
+                <Text style={styles.photoCounter}>
+                  {currentIndex + 1} / {photos.length}
+                </Text>
+              </View>
+            )}
